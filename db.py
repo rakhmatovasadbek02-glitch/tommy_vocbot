@@ -1,7 +1,12 @@
 import psycopg2
 import os
 
-conn = psycopg2.connect(os.getenv("DATABASE_URL"))
+DATABASE_URL = os.getenv("DATABASE_URL")
+
+if not DATABASE_URL or "postgres" not in DATABASE_URL:
+    raise Exception(f"❌ DATABASE_URL is wrong: {DATABASE_URL}")
+
+conn = psycopg2.connect(DATABASE_URL)
 cursor = conn.cursor()
 
 def init_db():
@@ -10,9 +15,7 @@ def init_db():
         user_id BIGINT PRIMARY KEY,
         username TEXT,
         role TEXT DEFAULT 'student',
-        score REAL DEFAULT 0,
-        wrong INTEGER DEFAULT 0,
-        streak INTEGER DEFAULT 0
+        score REAL DEFAULT 0
     )
     """)
 
@@ -27,16 +30,6 @@ def init_db():
     )
     """)
 
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS word_stats (
-        user_id BIGINT,
-        word TEXT,
-        correct INTEGER DEFAULT 0,
-        wrong INTEGER DEFAULT 0,
-        PRIMARY KEY (user_id, word)
-    )
-    """)
-
     conn.commit()
 
 def add_user(user_id, username):
@@ -46,21 +39,6 @@ def add_user(user_id, username):
     ON CONFLICT (user_id) DO NOTHING
     """, (user_id, username))
     conn.commit()
-
-def set_role(user_id, role):
-    cursor.execute("UPDATE users SET role=%s WHERE user_id=%s", (role, user_id))
-    conn.commit()
-
-def get_role(user_id):
-    cursor.execute("SELECT role FROM users WHERE user_id=%s", (user_id,))
-    r = cursor.fetchone()
-    return r[0] if r else "student"
-
-def is_teacher(user_id):
-    return get_role(user_id) in ["teacher", "editor"]
-
-def is_editor(user_id):
-    return get_role(user_id) == "editor"
 
 def get_leaderboard():
     cursor.execute("""

@@ -1,26 +1,34 @@
-import os, asyncio, json, random
+import os
+import asyncio
+import json
+import random
+
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from aiogram.filters import Command
 
 from db import *
 
-TOKEN = os.getenv("8600741649:AAFJyvAlARo8BkfbyqysHDnNFxyCDRT42wU")
+# ✅ TOKEN FIX
+TOKEN = os.getenv("BOT_TOKEN")
 
-EDITOR_ID = 111111111
-TEACHER_ID = 222222222
+if not TOKEN:
+    raise Exception("❌ BOT_TOKEN is not set!")
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
+# Load vocab
 with open("vocab.json", "r", encoding="utf-8") as f:
     vocab = json.load(f)
 
 user_data = {}
 
+# Keyboard helper
 def kb(btns):
     return ReplyKeyboardMarkup(keyboard=btns, resize_keyboard=True)
 
+# Keyboards
 lang_kb = kb([[KeyboardButton(text="Russian 🇷🇺")],
               [KeyboardButton(text="Uzbek 🇺🇿")]])
 
@@ -30,16 +38,10 @@ mode_kb = kb([[KeyboardButton(text="EN → Native")],
 study_kb = kb([[KeyboardButton(text="📚 Learning Mode")],
                [KeyboardButton(text="📝 Exam Mode")]])
 
-main_student = kb([[KeyboardButton(text="📚 Start Learning")],
-                   [KeyboardButton(text="📊 My Stats")]])
+main_kb = kb([[KeyboardButton(text="📚 Start Learning")],
+              [KeyboardButton(text="🏆 Leaderboard")]])
 
-teacher_kb = kb([[KeyboardButton(text="👥 All Students")],
-                 [KeyboardButton(text="🏆 Leaderboard")]])
-
-editor_kb = kb([[KeyboardButton(text="📚 Start Learning")],
-                [KeyboardButton(text="👥 All Students")],
-                [KeyboardButton(text="🏆 Leaderboard")]])
-
+# START
 @dp.message(Command("start"))
 async def start(message: types.Message):
     user_id = message.from_user.id
@@ -47,25 +49,15 @@ async def start(message: types.Message):
 
     add_user(user_id, username)
 
-    if user_id == EDITOR_ID:
-        set_role(user_id, "editor")
-    elif user_id == TEACHER_ID:
-        set_role(user_id, "teacher")
+    await message.answer("Welcome!", reply_markup=main_kb)
 
-    role = get_role(user_id)
-
-    if role == "editor":
-        await message.answer("Editor panel", reply_markup=editor_kb)
-    elif role == "teacher":
-        await message.answer("Teacher panel", reply_markup=teacher_kb)
-    else:
-        await message.answer("Student panel", reply_markup=main_student)
-
+# START LEARNING
 @dp.message(lambda m: m.text == "📚 Start Learning")
 async def start_learning(message: types.Message):
     user_data[message.from_user.id] = {}
     await message.answer("Choose language:", reply_markup=lang_kb)
 
+# MAIN HANDLER
 @dp.message()
 async def handle(message: types.Message):
     user = user_data.setdefault(message.from_user.id, {})
@@ -83,12 +75,12 @@ async def handle(message: types.Message):
 
     if text == "EN → Native":
         user["mode"] = "en_to_native"
-        await message.answer("Choose study mode:", reply_markup=study_kb)
+        await message.answer("Choose mode:", reply_markup=study_kb)
         return
 
     if text == "Native → EN":
         user["mode"] = "native_to_en"
-        await message.answer("Choose study mode:", reply_markup=study_kb)
+        await message.answer("Choose mode:", reply_markup=study_kb)
         return
 
     if text == "📚 Learning Mode":
@@ -105,6 +97,7 @@ async def handle(message: types.Message):
         await process_answer(message, user, text)
         return
 
+# START TEST
 async def start_test(message, user):
     words = vocab["Elementary"]["1A"]
 
@@ -113,29 +106,24 @@ async def start_test(message, user):
         "queue": random.sample(words, len(words)),
         "mistakes": [],
         "score": 0,
-        "correct": 0,
-        "current_unit": "1ABC"
+        "correct": 0
     })
 
     await ask(message, user)
 
+# ASK QUESTION
 async def ask(message, user):
     if not user["queue"]:
-        if user["mistakes"] and user["study_mode"] == "learning":
-            user["queue"] = user["mistakes"]
-            user["mistakes"] = []
-            await message.answer("🔁 Repeating mistakes...")
-        else:
-            total = len(user["all_words"])
+        total = len(user["all_words"])
 
-            cursor.execute("""
-            INSERT INTO history (user_id, unit, score, total)
-            VALUES (%s, %s, %s, %s)
-            """, (message.from_user.id, user["current_unit"], user["score"], total))
-            conn.commit()
+        cursor.execute("""
+        INSERT INTO history (user_id, unit, score, total)
+        VALUES (%s, %s, %s, %s)
+        """, (message.from_user.id, "1ABC", user["score"], total))
+        conn.commit()
 
-            await message.answer(f"Finished!\nScore: {user['score']}/{total}")
-            return
+        await message.answer(f"Finished!\nScore: {user['score']}/{total}")
+        return
 
     word = user["queue"].pop()
 
@@ -164,15 +152,15 @@ async def ask(message, user):
         "attempts": 0
     }
 
-    kb_buttons = [[KeyboardButton(text=o)] for o in options]
-    await message.answer(q, reply_markup=kb(kb_buttons))
+    buttons = [[KeyboardButton(text=o)] for o in options]
+    await message.answer(q, reply_markup=kb(buttons))
 
+# PROCESS ANSWER
 async def process_answer(message, user, text):
     q = user["current"]
     q["attempts"] += 1
-    correct = q["correct"]
 
-    if text == correct:
+    if text == q["correct"]:
         if user["study_mode"] == "learning":
             user["score"] += 1 if q["attempts"] == 1 else 0.5
         else:
@@ -188,20 +176,21 @@ async def process_answer(message, user, text):
         user["mistakes"].append(q["word"])
         await ask(message, user)
 
-@dp.message(Command("leaderboard"))
+# LEADERBOARD
+@dp.message(lambda m: m.text == "🏆 Leaderboard")
 async def leaderboard(message: types.Message):
-    if not is_teacher(message.from_user.id):
-        return
-
     top = get_leaderboard()
+
     text = "🏆 Leaderboard:\n"
-    for i,(name,score) in enumerate(top,1):
+    for i, (name, score) in enumerate(top, 1):
         text += f"{i}. {name} — {score}\n"
+
     await message.answer(text)
 
+# RUN
 async def main():
     init_db()
-    print("Bot running...")
+    print("✅ Bot running...")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
