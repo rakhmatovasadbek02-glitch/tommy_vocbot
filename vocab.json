@@ -1,0 +1,13 @@
+{
+  "Elementary": {
+    "1A": [
+      {"en": "apple", "ru": "яблоко", "uz": "olma"},
+      {"en": "book", "ru": "книга", "uz": "kitob"},
+      {"en": "house", "ru": "дом", "uz": "uy"},
+      {"en": "car", "ru": "машина", "uz": "mashina"},
+      {"en": "water", "ru": "вода", "uz": "suv"}
+    ]
+  },
+  "Pre-Intermediate": {},
+  "Intermediate": {}
+}
