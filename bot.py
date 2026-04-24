@@ -9,95 +9,147 @@ from aiogram.filters import Command
 
 from db import *
 
-# ✅ TOKEN FIX
-TOKEN = os.getenv("BOT_TOKEN")
+TOKEN = os.getenv("8600741649:AAFJyvAlARo8BkfbyqysHDnNFxyCDRT42wU")
 
 if not TOKEN:
-    raise Exception("❌ BOT_TOKEN is not set!")
+    raise Exception("BOT_TOKEN not set")
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
-# Load vocab
 with open("vocab.json", "r", encoding="utf-8") as f:
     vocab = json.load(f)
 
 user_data = {}
 
-# Keyboard helper
+# ---------- KEYBOARDS ----------
+
 def kb(btns):
     return ReplyKeyboardMarkup(keyboard=btns, resize_keyboard=True)
 
-# Keyboards
-lang_kb = kb([[KeyboardButton(text="Russian 🇷🇺")],
-              [KeyboardButton(text="Uzbek 🇺🇿")]])
+lang_kb = kb([
+    [KeyboardButton(text="Russian 🇷🇺")],
+    [KeyboardButton(text="Uzbek 🇺🇿")]
+])
 
-mode_kb = kb([[KeyboardButton(text="EN → Native")],
-              [KeyboardButton(text="Native → EN")]])
+main_kb = kb([
+    [KeyboardButton(text="📚 Learning Mode")],
+    [KeyboardButton(text="📝 Exam Mode")],
+    [KeyboardButton(text="🏆 Leaderboard")]
+])
 
-study_kb = kb([[KeyboardButton(text="📚 Learning Mode")],
-               [KeyboardButton(text="📝 Exam Mode")]])
+direction_kb = kb([
+    [KeyboardButton(text="EN → Native")],
+    [KeyboardButton(text="Native → EN")]
+])
 
-main_kb = kb([[KeyboardButton(text="📚 Start Learning")],
-              [KeyboardButton(text="🏆 Leaderboard")]])
+end_kb = kb([
+    [KeyboardButton(text="🏆 Leaderboard")],
+    [KeyboardButton(text="🔙 Main Menu")]
+])
 
-# START
+# ---------- START ----------
+
 @dp.message(Command("start"))
 async def start(message: types.Message):
-    user_id = message.from_user.id
-    username = message.from_user.username or message.from_user.full_name
+    user_data[message.from_user.id] = {"step": "name"}
 
-    add_user(user_id, username)
+    await message.answer(
+        "Welcome! 👋\n\n"
+        "Enter:\nName Surname Group\n\n"
+        "Example:\nAsadbek Rakhmatov 101"
+    )
 
-    await message.answer("Welcome!", reply_markup=main_kb)
+# ---------- MAIN HANDLER ----------
 
-# START LEARNING
-@dp.message(lambda m: m.text == "📚 Start Learning")
-async def start_learning(message: types.Message):
-    user_data[message.from_user.id] = {}
-    await message.answer("Choose language:", reply_markup=lang_kb)
-
-# MAIN HANDLER
 @dp.message()
 async def handle(message: types.Message):
-    user = user_data.setdefault(message.from_user.id, {})
+    user_id = message.from_user.id
     text = message.text
 
+    user = user_data.setdefault(user_id, {})
+
+    # -------- STEP 1: NAME --------
+    if user.get("step") == "name":
+        parts = text.split()
+
+        if len(parts) < 3:
+            await message.answer("Please enter: Name Surname Group")
+            return
+
+        name = " ".join(parts[:-1])
+        group = parts[-1]
+
+        user["name"] = name
+        user["group"] = group
+
+        add_user(user_id, name)
+
+        user["step"] = "language"
+
+        await message.answer("Choose language:", reply_markup=lang_kb)
+        return
+
+    # -------- STEP 2: LANGUAGE --------
     if text == "Russian 🇷🇺":
         user["lang"] = "ru"
-        await message.answer("Choose direction:", reply_markup=mode_kb)
+        user["step"] = "menu"
+        await message.answer("Choose mode:", reply_markup=main_kb)
         return
 
     if text == "Uzbek 🇺🇿":
         user["lang"] = "uz"
-        await message.answer("Choose direction:", reply_markup=mode_kb)
+        user["step"] = "menu"
+        await message.answer("Choose mode:", reply_markup=main_kb)
+        return
+
+    # -------- MAIN MENU --------
+    if text == "🔙 Main Menu":
+        await message.answer("Choose mode:", reply_markup=main_kb)
+        return
+
+    # -------- LEARNING MODE --------
+    if text == "📚 Learning Mode":
+        user["study_mode"] = "learning"
+        await message.answer("Choose direction:", reply_markup=direction_kb)
         return
 
     if text == "EN → Native":
         user["mode"] = "en_to_native"
-        await message.answer("Choose mode:", reply_markup=study_kb)
+        await start_test(message, user)
         return
 
     if text == "Native → EN":
         user["mode"] = "native_to_en"
-        await message.answer("Choose mode:", reply_markup=study_kb)
-        return
-
-    if text == "📚 Learning Mode":
-        user["study_mode"] = "learning"
         await start_test(message, user)
         return
 
+    # -------- EXAM MODE --------
     if text == "📝 Exam Mode":
         user["study_mode"] = "exam"
+        user["mode"] = "mixed"
         await start_test(message, user)
         return
 
+    # -------- LEADERBOARD --------
+    if text == "🏆 Leaderboard":
+        top = get_leaderboard()
+
+        text_out = "🏆 Leaderboard:\n\n"
+        for i, (name, score) in enumerate(top, 1):
+            text_out += f"{i}. {name} — {score}\n"
+
+        await message.answer(text_out, reply_markup=end_kb)
+        return
+
+    # -------- ANSWER --------
     if "current" in user and text in user["current"]["options"]:
         await process_answer(message, user, text)
         return
 
-# START TEST
+
+# ---------- TEST LOGIC ----------
+
 async def start_test(message, user):
     words = vocab["Elementary"]["1A"]
 
@@ -111,7 +163,7 @@ async def start_test(message, user):
 
     await ask(message, user)
 
-# ASK QUESTION
+
 async def ask(message, user):
     if not user["queue"]:
         total = len(user["all_words"])
@@ -122,15 +174,31 @@ async def ask(message, user):
         """, (message.from_user.id, "1ABC", user["score"], total))
         conn.commit()
 
-        await message.answer(f"Finished!\nScore: {user['score']}/{total}")
+        await message.answer(
+            f"Finished!\n\nScore: {user['score']} / {total}",
+            reply_markup=end_kb
+        )
         return
 
     word = user["queue"].pop()
 
-    if user["mode"] == "en_to_native":
+    # -------- MIXED MODE --------
+    if user["mode"] == "mixed":
+        if random.choice([True, False]):
+            q = word["en"]
+            correct = word[user["lang"]]
+            key = user["lang"]
+        else:
+            q = word[user["lang"]]
+            correct = word["en"]
+            key = "en"
+
+    # -------- NORMAL MODES --------
+    elif user["mode"] == "en_to_native":
         q = word["en"]
         correct = word[user["lang"]]
         key = user["lang"]
+
     else:
         q = word[user["lang"]]
         correct = word["en"]
@@ -153,21 +221,33 @@ async def ask(message, user):
     }
 
     buttons = [[KeyboardButton(text=o)] for o in options]
+
     await message.answer(q, reply_markup=kb(buttons))
 
-# PROCESS ANSWER
+
+# ---------- ANSWER PROCESS ----------
+
 async def process_answer(message, user, text):
     q = user["current"]
     q["attempts"] += 1
 
-    if text == q["correct"]:
+    correct = q["correct"]
+
+    # -------- CORRECT --------
+    if text == correct:
+
         if user["study_mode"] == "learning":
-            user["score"] += 1 if q["attempts"] == 1 else 0.5
+            if q["attempts"] == 1:
+                user["score"] += 1
+            elif q["attempts"] == 2:
+                user["score"] += 0.5
         else:
             user["score"] += 1
 
         user["correct"] += 1
         await ask(message, user)
+
+    # -------- WRONG --------
     else:
         if user["study_mode"] == "learning" and q["attempts"] < 2:
             await message.answer("Try again")
@@ -176,22 +256,14 @@ async def process_answer(message, user, text):
         user["mistakes"].append(q["word"])
         await ask(message, user)
 
-# LEADERBOARD
-@dp.message(lambda m: m.text == "🏆 Leaderboard")
-async def leaderboard(message: types.Message):
-    top = get_leaderboard()
 
-    text = "🏆 Leaderboard:\n"
-    for i, (name, score) in enumerate(top, 1):
-        text += f"{i}. {name} — {score}\n"
+# ---------- RUN ----------
 
-    await message.answer(text)
-
-# RUN
 async def main():
     init_db()
-    print("✅ Bot running...")
+    print("Bot running...")
     await dp.start_polling(bot)
+
 
 if __name__ == "__main__":
     asyncio.run(main())
